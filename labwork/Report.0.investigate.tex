@@ -1,0 +1,43 @@
+\documentclass{article} \usepackage[utf8]{inputenc} 
+\title{Report.0.investigate} \author{lehuyduc3 } \date{October 2020} 
+\usepackage{indentfirst} \parindent{} \begin{document} \maketitle 
+\section{How to compile} First, cd to folder "labwork". Then, use 
+commands: \\ \begin{verbatim}
+>> cmake CMakeLists.txt make -j
+\end{verbatim} \section{Condition to compile} - NVIDIA driver - CUDA SDK 
+7+ - A C++ compiler (such as g++ 5.x.x and above) \section{Command 
+output} \subsection{cmake CMakeLists.txt} \begin{verbatim} -- The C 
+compiler identification is GNU 8.3.0 -- The CXX compiler identification 
+is GNU 8.3.0 -- Check for working C compiler: /usr/bin/cc -- Check for 
+working C compiler: /usr/bin/cc -- works -- Detecting C compiler ABI 
+info -- Detecting C compiler ABI info - done -- Detecting C compile 
+features -- Detecting C compile features - done -- Check for working CXX 
+compiler: /usr/bin/c++ -- Check for working CXX compiler: /usr/bin/c++ 
+-- works -- Detecting CXX compiler ABI info -- Detecting CXX compiler 
+ABI info - done -- Detecting CXX compile features -- Detecting CXX 
+compile features - done -- Looking for pthread.h -- Looking for 
+pthread.h - found -- Looking for pthread_create -- Looking for 
+pthread_create - not found -- Looking for pthread_create in pthreads -- 
+Looking for pthread_create in pthreads - not found -- Looking for 
+pthread_create in pthread -- Looking for pthread_create in pthread - 
+found -- Found Threads: TRUE -- Found CUDA: /usr/local/cuda (found 
+version "10.2") -- Found OpenMP_C: -fopenmp (found version "4.5") -- 
+Found OpenMP_CXX: -fopenmp (found version "4.5") -- Found OpenMP: TRUE 
+(found version "4.5") -- Found JPEG: 
+/usr/lib/x86_64-linux-gnu/libjpeg.so (found version "62") -- Configuring 
+done -- Generating done -- Build files have been written to: 
+/home/duclh/advancedhpc2020/labwork \end{verbatim} \subsection{make -j} 
+\scriptsize \begin{verbatim} [ 25\%] Building NVCC (Device) object 
+CMakeFiles/labwork.dir/src/labwork_generated_jpegloader.cu.o [ 50\%] 
+Building NVCC (Device) object 
+CMakeFiles/labwork.dir/src/labwork_generated_labwork.cu.o 
+/home/duclh/advancedhpc2020/labwork/src/labwork.cu(38): warning: the 
+format string ends before this argument Scanning dependencies of target 
+labwork [ 75\%] Building CXX object 
+CMakeFiles/labwork.dir/src/timer.cpp.o [100\%] Linking CXX executable 
+labwork [100\%] Built target labwork \end{verbatim} \subsection{Running 
+the program} \small \begin{verbatim}
+>> cd labwork ./labwork 1 data/cloud.jpeg
+USTH ICT Master 2018, Advanced Programming for HPC. Warming up... 
+Starting labwork 1 labwork 1 CPU ellapsed 250.4ms labwork 1 ellapsed 
+3.7ms \end{verbatim} \end{document}
