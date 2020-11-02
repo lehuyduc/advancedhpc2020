@@ -1,0 +1,72 @@
+\documentclass[14pt]{article}
+\usepackage
+[
+        a4paper,% other options: a3paper, a5paper, etc
+        left=2cm,
+        right=2cm,
+        top=3cm,
+        bottom=4cm,
+]
+{geometry}
+
+\usepackage[utf8]{inputenc}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\lstset { %
+    language=C++,
+    backgroundcolor=\color{black!5}, % set backgroundcolor
+    basicstyle=\footnotesize,% basic font setting
+}
+
+
+\title{Report.2.Device.Info}
+\author{lehuyduc3 }
+\date{November 2020}
+\usepackage{indentfirst}
+\parindent{}
+
+\begin{document}
+
+\maketitle
+
+\section{Function to print device properties}
+\begin{lstlisting}
+    void printDevProp(cudaDeviceProp devProp)
+    {
+        printf("Name:                          %s\n",  devProp.name);
+        printf("Total global memory:           %lu\n",  devProp.totalGlobalMem);
+        printf("Warp size:                     %d\n",  devProp.warpSize);
+        printf("Memory Clock Rate (KHz):       %d\n", devProp.memoryClockRate);
+        printf("Memory Bus Width (bits):       %d\n", devProp.memoryBusWidth);
+        printf("Peak Memory Bandwidth (GB/s):  %f\n\n", 2.0*devProp.memoryClockRate
+                                                           *(devProp.memoryBusWidth/8)/1.0e6);
+        printf("Clock rate:                    %d\n",  devProp.clockRate);
+        printf("Number of multiprocessors:     %d\n",  devProp.multiProcessorCount);
+        printf("Number of CUDA cores:          %d\n", getSPcores(devProp));
+        return;
+    }
+    ...
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, i);
+    printDevProp(prop);
+\end{lstlisting}
+
+\section{Outout on my laptop}
+\begin{verbatim}
+    Starting labwork 2
+    Number total of GPU : 1
+
+    Name:                          GeForce GTX 1060
+    Total global memory:           6373572608
+    Warp size:                     32
+    Memory Clock Rate (KHz):       4004000
+    Memory Bus Width (bits):       192
+    Peak Memory Bandwidth (GB/s):  192.192000
+    
+    Clock rate:                    1670500
+    Number of multiprocessors:     10
+    Number of CUDA cores:          1280
+\end{verbatim}
+
+\end{document}

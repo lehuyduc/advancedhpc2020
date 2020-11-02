@@ -188,6 +188,7 @@ void printDevProp(cudaDeviceProp devProp)
     printf("Peak Memory Bandwidth (GB/s):  %f\n\n", 2.0*devProp.memoryClockRate*(devProp.memoryBusWidth/8)/1.0e6);
     printf("Clock rate:                    %d\n",  devProp.clockRate);
     printf("Number of multiprocessors:     %d\n",  devProp.multiProcessorCount);
+    printf("Number of CUDA cores:          %d\n", getSPcores(devProp));
     return;
 }
 
