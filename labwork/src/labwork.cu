@@ -177,6 +177,20 @@ int getSPcores(cudaDeviceProp devProp) {
     return cores;
 }
 
+//***********************************
+void printDevProp(cudaDeviceProp devProp)
+{
+    printf("Name:                          %s\n",  devProp.name);
+    printf("Total global memory:           %lu\n",  devProp.totalGlobalMem);
+    printf("Warp size:                     %d\n",  devProp.warpSize);
+    printf("Memory Clock Rate (KHz):       %d\n", devProp.memoryClockRate);
+    printf("Memory Bus Width (bits):       %d\n", devProp.memoryBusWidth);
+    printf("Peak Memory Bandwidth (GB/s):  %f\n\n", 2.0*devProp.memoryClockRate*(devProp.memoryBusWidth/8)/1.0e6);
+    printf("Clock rate:                    %d\n",  devProp.clockRate);
+    printf("Number of multiprocessors:     %d\n",  devProp.multiProcessorCount);
+    return;
+}
+
 void Labwork::labwork2_GPU() {
     int nDevices = 0;
     // get all devices
@@ -187,8 +201,8 @@ void Labwork::labwork2_GPU() {
         cudaDeviceProp prop;
         cudaGetDeviceProperties(&prop, i);
         // something more here
+        printDevProp(prop);
     }
-
 }
 
 //**********************
