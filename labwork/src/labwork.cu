@@ -2,8 +2,9 @@
 #include <include/labwork.h>
 #include <cuda_runtime_api.h>
 #include <omp.h>
+#include <fstream>
 
-#define ACTIVE_THREADS 4
+#define ACTIVE_THREADS 6
 
 int main(int argc, char **argv) {
     printf("USTH ICT Master 2018, Advanced Programming for HPC.\n");
@@ -35,7 +36,7 @@ int main(int argc, char **argv) {
         case 1:
             labwork.labwork1_CPU();
             labwork.saveOutputImage("labwork2-cpu-out.jpg");
-            printf("labwork 1 CPU ellapsed %.1fms\n", lwNum, timer.getElapsedTimeInMilliSec());
+            printf("labwork %d CPU ellapsed %.1fms\n", lwNum, timer.getElapsedTimeInMilliSec());
             timer.start();
             labwork.labwork1_OpenMP();
             labwork.saveOutputImage("labwork2-openmp-out.jpg");
@@ -83,6 +84,7 @@ int main(int argc, char **argv) {
             break;
     }
     printf("labwork %d ellapsed %.1fms\n", lwNum, timer.getElapsedTimeInMilliSec());
+    printf("labwork %d ellapsed see in Report%d\n", lwNum, lwNum);
 }
 
 void Labwork::loadInputImage(std::string inputFileName) {
@@ -96,20 +98,57 @@ void Labwork::saveOutputImage(std::string outputFileName) {
 void Labwork::labwork1_CPU() {
     int pixelCount = inputImage->width * inputImage->height;
     outputImage = static_cast<char *>(malloc(pixelCount * 3));
+
     for (int j = 0; j < 100; j++) {     // let's do it 100 times, otherwise it's too fast!
         for (int i = 0; i < pixelCount; i++) {
             outputImage[i * 3] = (char) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
-                                          (int) inputImage->buffer[i * 3 + 2]) / 3);
+                                        (int) inputImage->buffer[i * 3 + 2]) / 3);
             outputImage[i * 3 + 1] = outputImage[i * 3];
             outputImage[i * 3 + 2] = outputImage[i * 3];
         }
-    }
+    }        
 }
 
 void Labwork::labwork1_OpenMP() {
     int pixelCount = inputImage->width * inputImage->height;
     outputImage = static_cast<char *>(malloc(pixelCount * 3));
-    // do something here
+    
+    std::ofstream fo("Report1/bench_labwork1_teamsize.txt");
+    for (int nbThread = 1; nbThread <= 7; nbThread++)
+    {
+        omp_set_num_threads(nbThread);
+        Timer timer;
+        timer.start();
+        for (int j = 0; j < 100; j++) {     // let's do it 100 times, otherwise it's too fast!
+            #pragma omp parallel for
+            for (int i = 0; i < pixelCount; i++) {
+                outputImage[i * 3] = (char) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
+                                            (int) inputImage->buffer[i * 3 + 2]) / 3);
+                outputImage[i * 3 + 1] = outputImage[i * 3];
+                outputImage[i * 3 + 2] = outputImage[i * 3];
+            }
+        }
+        fo << nbThread << " " << timer.getElapsedTimeInMilliSec() << "\n";
+    }
+    fo.close();
+
+    omp_set_num_threads(6);
+    fo.open("Report1/bench_labwork1_dynamic.txt");
+    for (int portion=1; portion <= 20; portion++) {
+        Timer timer;
+        timer.start();
+        for (int j = 0; j < 100; j++) {     // let's do it 100 times, otherwise it's too fast!
+            #pragma omp parallel for schedule(dynamic, pixelCount / portion)
+            for (int i = 0; i < pixelCount; i++) {
+                outputImage[i * 3] = (char) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
+                                            (int) inputImage->buffer[i * 3 + 2]) / 3);
+                outputImage[i * 3 + 1] = outputImage[i * 3];
+                outputImage[i * 3 + 2] = outputImage[i * 3];
+            }
+        }
+        fo << portion << " " << timer.getElapsedTimeInMilliSec() << "\n";
+    }
+    fo.close();
 }
 
 int getSPcores(cudaDeviceProp devProp) {
@@ -152,18 +191,42 @@ void Labwork::labwork2_GPU() {
 
 }
 
+//**********************
+__global__
+void rgb2gray(char* goutput, char* ginput, int pixelCount)
+{
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i=index; i<pixelCount; i += stride) {
+        goutput[i * 3] = (char)((int(ginput[i * 3]) + int(ginput[i * 3 + 1]) + int(ginput[i * 3 + 2])) / 3);
+        goutput[i * 3 + 1] = goutput[i * 3];
+        goutput[i * 3 + 2] = goutput[i * 3];        
+    }
+}
+
 void Labwork::labwork3_GPU() {
     // Calculate number of pixels
+    int pixelCount = inputImage->width * inputImage->height;
+    outputImage = static_cast<char *>(malloc(pixelCount * 3));
 
     // Allocate CUDA memory    
+    char* ginput = nullptr, *goutput = nullptr;
+    cudaMalloc(&ginput, pixelCount * 3);
+    cudaMalloc(&goutput, pixelCount * 3);
 
     // Copy CUDA Memory from CPU to GPU
+    cudaMemcpy(ginput, inputImage->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
 
     // Processing
+    rgb2gray<<<80, 64>>>(goutput, ginput, pixelCount);
 
     // Copy CUDA Memory from GPU to CPU
+    cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
 
     // Cleaning
+    cudaFree(ginput);
+    cudaFree(goutput);
 }
 
 void Labwork::labwork4_GPU() {

@@ -6,7 +6,7 @@
 
 #IncludeRegexTransform: 
 
-/home/duclh/advancedhpc2020/labwork/src/timer.cpp
+/home/lehuyduc/Documents/advancedhpc2020/labwork/src/timer.cpp
 include/timer.h
 -
 stdlib.h
