@@ -35,11 +35,11 @@ int main(int argc, char **argv) {
     switch (lwNum) {
         case 1:
             labwork.labwork1_CPU();
-            labwork.saveOutputImage("labwork2-cpu-out.jpg");
+            labwork.saveOutputImage("labwork1-cpu-out.jpg");
             printf("labwork %d CPU ellapsed %.1fms\n", lwNum, timer.getElapsedTimeInMilliSec());
             timer.start();
             labwork.labwork1_OpenMP();
-            labwork.saveOutputImage("labwork2-openmp-out.jpg");
+            labwork.saveOutputImage("labwork1-openmp-out.jpg");
             break;
         case 2:
             labwork.labwork2_GPU();
@@ -240,7 +240,7 @@ void Labwork::labwork3_GPU() {
 			cudaMemcpy(ginput, inputImage->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
 
 			// Processing
-			int numBlock = pixelCount / blockSize + 1;
+			int numBlock = (pixelCount + blockSize - 1) / blockSize;
 			rgb2gray_labwork3<<<numBlock, blockSize>>>(goutput, ginput, pixelCount);
 			
 			// Copy CUDA Memory from GPU to CPU
@@ -312,7 +312,7 @@ void Labwork::labwork4_GPU() {
     {
     	// Calculate number of pixels
     	timer.start();
-    	dim3 gridDim = dim3(height / blockSize + 1, width / blockSize + 1, 1);
+    	dim3 gridDim = dim3((height + blockSize - 1) / blockSize, (width + blockSize - 1) / blockSize, 1);
     	dim3 blockDim = dim3(blockSize, blockSize, 1);
     	
     	for (int t=1; t<=100; t++)
@@ -363,6 +363,7 @@ void Labwork::labwork4_GPU() {
 	cudaFree(goutput);
 }
 
+//*********************
 void Labwork::labwork5_CPU() {
 }
 
