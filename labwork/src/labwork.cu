@@ -252,10 +252,9 @@ void Labwork::labwork3_GPU() {
     }
     fo.close();
     
-    fo.open("Report3/bench_labwork3_kerneltime");
+    fo.open("Report3/bench_labwork3_kerneltime.txt");
     for (int blockSize=1; blockSize<=256; blockSize++)
     {
-    	// Calculate number of pixels
     	kernelTime = 0;
     	for (int t=1; t<=100; t++)
     	{	
@@ -276,12 +275,92 @@ void Labwork::labwork3_GPU() {
     }
     fo.close();
     
-    
     cudaFree(ginput);
-	cudaFree(goutput);
+	 cudaFree(goutput);
+}
+
+//**********************
+__global__
+void rgb2gray_labwork4(char* goutput, char* ginput, int height, int width, int pixelCount)
+{
+	const int row = blockIdx.x * blockDim.x + threadIdx.x,
+			  col = blockIdx.y * blockDim.y + threadIdx.y;
+	
+	if (row < height && col < width) {
+		const int i = row * width + col;
+		goutput[i * 3] = (char)((int(ginput[i * 3]) + int(ginput[i * 3 + 1]) + int(ginput[i * 3 + 2])) / 3);
+        goutput[i * 3 + 1] = goutput[i * 3];
+        goutput[i * 3 + 2] = goutput[i * 3];
+	}			  
 }
 
 void Labwork::labwork4_GPU() {
+	Timer timer;
+	double tmp, kernelTime;
+	
+	int pixelCount = inputImage->width * inputImage->height;
+	int width = inputImage->width, height = inputImage->height;
+	outputImage = static_cast<char *>(malloc(pixelCount * 3));
+	// Allocate CUDA memory    
+	char* ginput = nullptr, *goutput = nullptr;
+	cudaMalloc(&ginput, pixelCount * 3);
+	cudaMalloc(&goutput, pixelCount * 3);
+	
+	//****
+	std::ofstream fo("Report4/bench_labwork4_totaltime.txt");
+    for (int blockSize=8; blockSize<=32; blockSize+=8)
+    {
+    	// Calculate number of pixels
+    	timer.start();
+    	dim3 gridDim = dim3(height / blockSize + 1, width / blockSize + 1, 1);
+    	dim3 blockDim = dim3(blockSize, blockSize, 1);
+    	
+    	for (int t=1; t<=100; t++)
+    	{	
+			// Copy CUDA Memory from CPU to GPU
+			cudaMemcpy(ginput, inputImage->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
+
+			// Processing
+			rgb2gray_labwork4<<<gridDim, blockDim>>>(goutput, ginput, height, width, pixelCount);
+			
+			// Copy CUDA Memory from GPU to CPU
+			cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);		
+    	}
+    	tmp = timer.getElapsedTimeInMilliSec();
+    	fo << blockSize << " " << tmp << "\n";
+    }
+    fo.close();
+    
+    fo.open("Report4/bench_labwork4_kerneltime.txt");
+    for (int blockSize=8; blockSize<=32; blockSize+=8)
+    {
+    	// Calculate number of pixels
+    	timer.start();
+    	dim3 gridDim = dim3(height / blockSize + 1, width / blockSize + 1, 1);
+    	dim3 blockDim = dim3(blockSize, blockSize, 1);
+    	kernelTime = 0;
+    	
+    	for (int t=1; t<=100; t++)
+    	{	
+			// Copy CUDA Memory from CPU to GPU
+			cudaMemcpy(ginput, inputImage->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
+
+			// Processing
+			timer.start();
+			rgb2gray_labwork4<<<gridDim, blockDim>>>(goutput, ginput, height, width, pixelCount);
+			cudaDeviceSynchronize();
+			kernelTime += timer.getElapsedTimeInMilliSec();
+			
+			// Copy CUDA Memory from GPU to CPU
+			cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);		
+    	}
+    	tmp = timer.getElapsedTimeInMilliSec();
+    	fo << blockSize << " " << kernelTime << "\n";
+    }
+    fo.close();
+          
+    cudaFree(ginput);
+	cudaFree(goutput);
 }
 
 void Labwork::labwork5_CPU() {
