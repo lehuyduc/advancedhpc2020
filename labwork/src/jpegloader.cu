@@ -14,7 +14,7 @@ void errorHandler(j_common_ptr info) {
 }
 
 /**
- * Perform a load jpeg file into a RGB 1-dimension char [] array
+ * Perform a load jpeg file into a RGB 1-dimension byte [] array
  */
 JpegInfo *JpegLoader::load(std::string filename) {
     struct ErrorManager jerr;
@@ -47,7 +47,7 @@ JpegInfo *JpegLoader::load(std::string filename) {
     }
 
     int bufferSize = info.output_height * rowStride;
-    unsigned char *imageBuffer = new unsigned char[bufferSize]();
+    byte *imageBuffer = new byte[bufferSize]();
 
     buffer = (*info.mem->alloc_sarray) ((j_common_ptr) &info, JPOOL_IMAGE, rowStride, 1);
     while (info.output_scanline < info.output_height) {
@@ -59,7 +59,7 @@ JpegInfo *JpegLoader::load(std::string filename) {
     fclose(infile);
 
     JpegInfo *jpegInfo = new JpegInfo();
-    jpegInfo->buffer = (char*)imageBuffer;
+    jpegInfo->buffer = (byte*)imageBuffer;
     jpegInfo->width = info.output_width;
     jpegInfo->height = info.output_height;
 
@@ -69,7 +69,7 @@ JpegInfo *JpegLoader::load(std::string filename) {
 /**
  * Save an 1d array of width * height pixel data into a jpeg
  */
-bool JpegLoader::save(std::string filename, char *imageBuffer, int width, int height, int quality) {
+bool JpegLoader::save(std::string filename, byte *imageBuffer, int width, int height, int quality) {
     struct jpeg_compress_struct info;
     struct jpeg_error_mgr jerr;
     FILE * outfile;

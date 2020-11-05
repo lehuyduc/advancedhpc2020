@@ -97,11 +97,11 @@ void Labwork::saveOutputImage(std::string outputFileName) {
 
 void Labwork::labwork1_CPU() {
     int pixelCount = inputImage->width * inputImage->height;
-    outputImage = static_cast<char *>(malloc(pixelCount * 3));
+    outputImage = static_cast<byte *>(malloc(pixelCount * 3));
 
     for (int j = 0; j < 100; j++) {     // let's do it 100 times, otherwise it's too fast!
         for (int i = 0; i < pixelCount; i++) {
-            outputImage[i * 3] = (char) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
+            outputImage[i * 3] = (byte) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
                                         (int) inputImage->buffer[i * 3 + 2]) / 3);
             outputImage[i * 3 + 1] = outputImage[i * 3];
             outputImage[i * 3 + 2] = outputImage[i * 3];
@@ -111,7 +111,7 @@ void Labwork::labwork1_CPU() {
 
 void Labwork::labwork1_OpenMP() {
     int pixelCount = inputImage->width * inputImage->height;
-    outputImage = static_cast<char *>(malloc(pixelCount * 3));
+    outputImage = static_cast<byte *>(malloc(pixelCount * 3));
     
     std::ofstream fo("Report1/bench_labwork1_teamsize.txt");
     for (int nbThread = 1; nbThread <= 7; nbThread++)
@@ -122,7 +122,7 @@ void Labwork::labwork1_OpenMP() {
         for (int j = 0; j < 100; j++) {     // let's do it 100 times, otherwise it's too fast!
             #pragma omp parallel for
             for (int i = 0; i < pixelCount; i++) {
-                outputImage[i * 3] = (char) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
+                outputImage[i * 3] = (byte) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
                                             (int) inputImage->buffer[i * 3 + 2]) / 3);
                 outputImage[i * 3 + 1] = outputImage[i * 3];
                 outputImage[i * 3 + 2] = outputImage[i * 3];
@@ -140,7 +140,7 @@ void Labwork::labwork1_OpenMP() {
         for (int j = 0; j < 100; j++) {     // let's do it 100 times, otherwise it's too fast!
             #pragma omp parallel for schedule(dynamic, pixelCount / portion)
             for (int i = 0; i < pixelCount; i++) {
-                outputImage[i * 3] = (char) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
+                outputImage[i * 3] = (byte) (((int) inputImage->buffer[i * 3] + (int) inputImage->buffer[i * 3 + 1] +
                                             (int) inputImage->buffer[i * 3 + 2]) / 3);
                 outputImage[i * 3 + 1] = outputImage[i * 3];
                 outputImage[i * 3 + 2] = outputImage[i * 3];
@@ -208,11 +208,11 @@ void Labwork::labwork2_GPU() {
 
 //**********************
 __global__
-void rgb2gray_labwork3(char* goutput, char* ginput, int pixelCount)
+void rgb2gray_labwork3(byte* goutput, byte* ginput, int pixelCount)
 {
 	const int i = blockIdx.x * blockDim.x + threadIdx.x;
 	if (i < pixelCount) {
-		goutput[i * 3] = (char)((int(ginput[i * 3]) + int(ginput[i * 3 + 1]) + int(ginput[i * 3 + 2])) / 3);
+		goutput[i * 3] = (byte)((int(ginput[i * 3]) + int(ginput[i * 3 + 1]) + int(ginput[i * 3 + 2])) / 3);
         goutput[i * 3 + 1] = goutput[i * 3];
         goutput[i * 3 + 2] = goutput[i * 3];        
 	}
@@ -223,9 +223,9 @@ void Labwork::labwork3_GPU() {
 	double tmp, kernelTime;
 	
 	int pixelCount = inputImage->width * inputImage->height;
-	outputImage = static_cast<char *>(malloc(pixelCount * 3));
+	outputImage = static_cast<byte *>(malloc(pixelCount * 3));
 	// Allocate CUDA memory    
-	char* ginput = nullptr, *goutput = nullptr;
+	byte* ginput = nullptr, *goutput = nullptr;
 	cudaMalloc(&ginput, pixelCount * 3);
 	cudaMalloc(&goutput, pixelCount * 3);
 
@@ -281,14 +281,14 @@ void Labwork::labwork3_GPU() {
 
 //**********************
 __global__
-void rgb2gray_labwork4(char* goutput, char* ginput, int height, int width, int pixelCount)
+void rgb2gray_labwork4(byte* goutput, byte* ginput, int height, int width, int pixelCount)
 {
 	const int row = blockIdx.x * blockDim.x + threadIdx.x,
 			  col = blockIdx.y * blockDim.y + threadIdx.y;
 	
 	if (row < height && col < width) {
 		const int i = row * width + col;
-		goutput[i * 3] = (char)((int(ginput[i * 3]) + int(ginput[i * 3 + 1]) + int(ginput[i * 3 + 2])) / 3);
+		goutput[i * 3] = (byte)((int(ginput[i * 3]) + int(ginput[i * 3 + 1]) + int(ginput[i * 3 + 2])) / 3);
         goutput[i * 3 + 1] = goutput[i * 3];
         goutput[i * 3 + 2] = goutput[i * 3];
 	}			  
@@ -300,9 +300,9 @@ void Labwork::labwork4_GPU() {
 	
 	int pixelCount = inputImage->width * inputImage->height;
 	int width = inputImage->width, height = inputImage->height;
-	outputImage = static_cast<char *>(malloc(pixelCount * 3));
+	outputImage = static_cast<byte *>(malloc(pixelCount * 3));
 	// Allocate CUDA memory    
-	char* ginput = nullptr, *goutput = nullptr;
+	byte* ginput = nullptr, *goutput = nullptr;
 	cudaMalloc(&ginput, pixelCount * 3);
 	cudaMalloc(&goutput, pixelCount * 3);
 	
@@ -382,13 +382,13 @@ __constant__ float gfiltSum, gfiltSumInv;
 __constant__ int gfiltH, gfiltW, gmidRow, gmidCol;
 
 void Labwork::labwork5_CPU() {
-	Timer timer;
-	double tmp, kernelTime;
+	//Timer timer;
+	//double tmp, kernelTime;
 
 	int pixelCount = inputImage->width * inputImage->height;
 	int width = inputImage->width, height = inputImage->height;
 	labwork1_CPU();
-	char* grayImage = (char*)malloc(pixelCount);
+	byte* grayImage = (byte*)malloc(pixelCount);
 	for (int i=0; i<pixelCount; i++) grayImage[i] = outputImage[3*i];
 
 	 //****
@@ -418,7 +418,88 @@ void Labwork::labwork5_CPU() {
     free(grayImage);
 }
 
+//****
+const int TILE_DIM = 32;
+
+// assume that blocks cover all columns: blockDim.y * gridDim.y >= width.
+// block size = TILE_DIM x TILE_DIM
+__global__
+void convo2dNoShare(byte* goutput, byte* ginput, int height, int width)
+{
+    // place top-left corner of filter on each thread (y,x) -> output at pixel (y + midRow, x + midCol)
+    const int outputCol = blockIdx.x * blockDim.x + threadIdx.x;
+    if (outputCol >= width) return; // these threads will always output to pixel not in image
+    const int col = outputCol - gmidCol; 
+    
+    for (int row = threadIdx.y - gmidRow; row < height; row += blockDim.y)
+    {
+        const int outputRow = row + gmidRow;
+        if (outputRow < height)
+        {
+            float sum = 0;
+
+            for (int u=0; u<gfiltH; u++)
+            for (int v=0; v<gfiltW; v++)
+            {
+                int pixelRow = row + u, pixelCol = col + v;
+				if (pixelRow < 0 || pixelCol < 0 || pixelRow >= height || pixelCol >= width) 
+					sum += 0;
+				else 
+					sum += gfilt[cell(u,v,gfiltW)] * ginput[cell(pixelRow, pixelCol, width)];
+            }
+            
+            int outputPixel = cell(outputRow, outputCol, width);
+            float outputValue = sum * gfiltSumInv;
+            goutput[3 * outputPixel] = outputValue;
+            goutput[3 * outputPixel + 1] = outputValue;
+            goutput[3 * outputPixel + 2] = outputValue;
+        }
+    } 
+}
+
+__global__
+void convo2dShare(byte* goutput, byte* ginput, int height, int width)
+{ 
+}
+
 void Labwork::labwork5_GPU(bool shared) {
+    //Timer timer;
+    //double tmp, kernelTime;
+
+    int pixelCount = inputImage->width * inputImage->height;
+    int width = inputImage->width, height = inputImage->height;
+    labwork1_CPU();
+    byte* grayImage = (byte*)malloc(pixelCount);
+    for (int i=0; i<pixelCount; i++) grayImage[i] = outputImage[3*i];
+
+    // Allocate CUDA memory    
+    byte* ginput = nullptr, *goutput = nullptr;
+    cudaMalloc(&ginput, pixelCount);
+    cudaMalloc(&goutput, pixelCount * 3);	
+
+    // Copy to constant memory
+    cudaMemcpyToSymbol(gfilt, filt, 49 * sizeof(float));
+    cudaMemcpyToSymbol(gfiltSum, &filtSum, sizeof(float));
+    cudaMemcpyToSymbol(gfiltSumInv, &filtSumInv, sizeof(float));
+    cudaMemcpyToSymbol(gfiltH, &filtH, sizeof(int));
+    cudaMemcpyToSymbol(gfiltW, &filtW, sizeof(int));
+    cudaMemcpyToSymbol(gmidRow, &midRow, sizeof(int));
+    cudaMemcpyToSymbol(gmidCol, &midCol, sizeof(int));
+
+    // 
+    cudaMemcpy(ginput, grayImage, pixelCount, cudaMemcpyHostToDevice);
+
+    // Processing
+    dim3 blockDim = dim3(TILE_DIM, TILE_DIM, 1);
+    dim3 gridDim = dim3((width + TILE_DIM - 1) / TILE_DIM, 1, 1);
+
+    if (!shared) convo2dNoShare<<<gridDim, blockDim>>>(goutput, ginput, height, width);
+    else convo2dShare<<<gridDim, blockDim>>>(goutput, ginput, height, width);
+
+    // Copy CUDA Memory from GPU to CPU
+    cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);	
+
+    free(grayImage);
 }
 
 //*****
