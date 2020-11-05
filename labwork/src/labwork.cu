@@ -602,7 +602,8 @@ __device__
 void binarizePixel(int i, byte* ginput, byte* goutput, float threshold)
 {
     const byte gray = byte(int(ginput[3*i]) + int(ginput[3*i + 1]) + int(ginput[3*i+2])) / 3;
-    const byte binary = (gray >= threshold) ? 255 : 0;
+    //const byte binary = (gray >= threshold) ? 255 : 0;
+    const byte binary = 255 * (gray >= threshold);
     goutput[3 * i] = binary;
     goutput[3 * i + 1] = binary;
     goutput[3 * i + 2] = binary;
