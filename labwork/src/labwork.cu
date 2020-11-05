@@ -364,12 +364,64 @@ void Labwork::labwork4_GPU() {
 }
 
 //*********************
+#define cell(i,j,w) ((i)*(w) + (j))
+
+const
+float filt[] = {0,   0,   1,   2,   1,   0,   0,
+					 0,   3,   13,  22,  13,  3,   0,
+					 1,   13,  59,  97,  59,  13,  1,
+					 2,   22,  97,  159, 97,  22,  2,
+					 1,   13,  59,  97,  59,  13,  1,
+					 0,   3,   13,  22,  13,  3,   0,
+					 0,   0,   1,   2,   1,   0,   0};
+const float filtSum = 1003, filtSumInv = double(1) / filtSum;
+const int filtH = 7, filtW = 7, midRow = 3, midCol = 3;
+
+__constant__ float gfilt[49];
+__constant__ float gfiltSum, gfiltSumInv;
+__constant__ int gfiltH, gfiltW, gmidRow, gmidCol;
+
 void Labwork::labwork5_CPU() {
+	Timer timer;
+	double tmp, kernelTime;
+
+	int pixelCount = inputImage->width * inputImage->height;
+	int width = inputImage->width, height = inputImage->height;
+	labwork1_CPU();
+	char* grayImage = (char*)malloc(pixelCount);
+	for (int i=0; i<pixelCount; i++) grayImage[i] = outputImage[3*i];
+
+	 //****
+	for (int i=-midRow; i<height; i++)
+	for (int j=-midCol; j<width; j++)
+	{
+		float sum = 0;
+		int outputX = i + midRow, outputY = j + midCol;
+		if (outputX < 0 || outputY < 0  || outputX >= height || outputY >= width) continue; // output outside image
+		
+		for (int u=0; u<filtH; u++)
+		for (int v=0; v<filtW; v++) 
+			{
+				int pixelRow = i + u, pixelCol = j + v;
+				if (pixelRow < 0 || pixelCol < 0 || pixelRow >= height || pixelCol >= width) 
+					sum += 0;
+				else 
+					sum += filt[cell(u,v,filtW)] * grayImage[cell(pixelRow, pixelCol, width)];
+			}
+			
+		int outputPixel = cell(outputX, outputY, width);
+		outputImage[3 * outputPixel] = sum * filtSumInv;
+		outputImage[3 * outputPixel + 1] = outputImage[3 * outputPixel];
+		outputImage[3 * outputPixel + 2] = outputImage[3 * outputPixel];
+    }
+    
+    free(grayImage);
 }
 
 void Labwork::labwork5_GPU(bool shared) {
 }
 
+//*****
 void Labwork::labwork6_GPU() {
 }
 
