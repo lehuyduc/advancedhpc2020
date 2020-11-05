@@ -29,6 +29,12 @@ int main(int argc, char **argv) {
         labwork.loadInputImage(inputFilename);
     }
 
+    bool option = true;
+    if (lwNum == 5) {
+        if (argc < 4) option = true;
+        else option = atoi(argv[3]);
+    }
+
     printf("Starting labwork %d\n", lwNum);
     Timer timer;
     timer.start();
@@ -55,7 +61,7 @@ int main(int argc, char **argv) {
         case 5:
             labwork.labwork5_CPU();
             labwork.saveOutputImage("labwork5-cpu-out.jpg");
-            labwork.labwork5_GPU(FALSE);
+            labwork.labwork5_GPU(option);
             labwork.saveOutputImage("labwork5-gpu-out.jpg");
             break;
         case 6:
@@ -420,6 +426,8 @@ void Labwork::labwork5_CPU() {
 
 //****
 const int TILE_DIM = 32;
+#define tidx (threadIdx.x)
+#define tidy (threadIdx.y)
 
 // assume that blocks cover all columns: blockDim.y * gridDim.y >= width.
 // block size = TILE_DIM x TILE_DIM
@@ -459,9 +467,60 @@ void convo2dNoShare(byte* goutput, byte* ginput, int height, int width)
 
 __global__
 void convo2dShare(byte* goutput, byte* ginput, int height, int width)
-{ 
+{
+    __shared__ float smem[TILE_DIM][TILE_DIM+1];    // padding to prevent mem conflict
+
+    // each block process (TILE_DIM - filtH + 1) rows and (TILE_DIM - filtW + 1) columns
+    const int stride = TILE_DIM - gfiltH + 1,
+              loop = (height + stride - 1) / stride;
+                
+    const int outputCol = blockIdx.x * (TILE_DIM - gfiltW + 1) + threadIdx.x, 
+              col = outputCol - gmidCol;
+    if (outputCol >= width) return;
+
+    int outputRow = blockIdx.y * blockDim.y + threadIdx.y,
+        row = outputRow - gmidRow;
+
+    //****
+    for (int t = 0; t < loop; t++)
+    {
+        __syncthreads();
+        
+        if (row < 0 || col < 0 || row>=height || col>=width)
+            smem[tidy][tidx] = 0;
+        else 
+            smem[tidy][tidx] = ginput[cell(row, col, width)];
+        __syncthreads();
+
+        
+        if (outputRow < height 
+            && tidy < TILE_DIM - gfiltH + 1 && tidx < TILE_DIM - gfiltW + 1) // top-left of the kernel is placed here, and it must fit shared mem 
+        {
+            float sum = 0;
+
+            for (int u=0; u<gfiltH; u++)
+            for (int v=0; v<gfiltW; v++)
+            {
+                int pixelRow = row + u, pixelCol = col + v;
+				if (pixelRow < 0 || pixelCol < 0 || pixelRow >= height || pixelCol >= width) 
+					sum += 0;
+				else 
+					sum += gfilt[cell(u,v,gfiltW)] * smem[tidy + u][tidx + v];
+            }
+            
+            int outputPixel = cell(outputRow, outputCol, width);
+            float outputValue = sum * gfiltSumInv;
+            goutput[3 * outputPixel] = outputValue;
+            goutput[3 * outputPixel + 1] = outputValue;
+            goutput[3 * outputPixel + 2] = outputValue;
+        }
+
+        outputRow += stride;
+        row += stride;
+    } 
 }
 
+#include <iostream>
 void Labwork::labwork5_GPU(bool shared) {
     //Timer timer;
     //double tmp, kernelTime;
@@ -477,7 +536,8 @@ void Labwork::labwork5_GPU(bool shared) {
     cudaMalloc(&ginput, pixelCount);
     cudaMalloc(&goutput, pixelCount * 3);	
 
-    // Copy to constant memory
+    // Copy to constant memory because all thread access the same place in the filter at the same time
+    // Constant scalar variable can be store in either register or constant mem. 
     cudaMemcpyToSymbol(gfilt, filt, 49 * sizeof(float));
     cudaMemcpyToSymbol(gfiltSum, &filtSum, sizeof(float));
     cudaMemcpyToSymbol(gfiltSumInv, &filtSumInv, sizeof(float));
@@ -486,16 +546,21 @@ void Labwork::labwork5_GPU(bool shared) {
     cudaMemcpyToSymbol(gmidRow, &midRow, sizeof(int));
     cudaMemcpyToSymbol(gmidCol, &midCol, sizeof(int));
 
-    // 
+    //*****
     cudaMemcpy(ginput, grayImage, pixelCount, cudaMemcpyHostToDevice);
 
     // Processing
-    dim3 blockDim = dim3(TILE_DIM, TILE_DIM, 1);
-    dim3 gridDim = dim3((width + TILE_DIM - 1) / TILE_DIM, 1, 1);
-
-    if (!shared) convo2dNoShare<<<gridDim, blockDim>>>(goutput, ginput, height, width);
-    else convo2dShare<<<gridDim, blockDim>>>(goutput, ginput, height, width);
-
+    if (!shared) {
+        dim3 blockDim = dim3(TILE_DIM, TILE_DIM, 1);
+        dim3 gridDim = dim3((width + TILE_DIM - 1) / TILE_DIM, 1, 1);
+        convo2dNoShare<<<gridDim, blockDim>>>(goutput, ginput, height, width);
+    }
+    else {
+        int columnsPerBlock = TILE_DIM - filtW + 1;
+        dim3 blockDim = dim3(TILE_DIM, TILE_DIM, 1);
+        dim3 gridDim = dim3((width + columnsPerBlock - 1) / columnsPerBlock, 1, 1);
+        convo2dShare<<<gridDim, blockDim>>>(goutput, ginput, height, width);
+    }
     // Copy CUDA Memory from GPU to CPU
     cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);	
 
