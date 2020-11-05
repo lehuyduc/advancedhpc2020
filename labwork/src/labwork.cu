@@ -3,8 +3,15 @@
 #include <cuda_runtime_api.h>
 #include <omp.h>
 #include <fstream>
+#include <iostream>
+#include <include/jpegloader.h>
+using std::cin;
+using std::cout;
+using std::string;
 
 #define ACTIVE_THREADS 6
+
+JpegInfo *inputImage2;
 
 int main(int argc, char **argv) {
     printf("USTH ICT Master 2018, Advanced Programming for HPC.\n");
@@ -33,6 +40,25 @@ int main(int argc, char **argv) {
     if (lwNum == 5) {
         if (argc < 4) option = true;
         else option = atoi(argv[3]);
+    }
+
+    char subTask = 'a';
+    float parameter = 0.0f;
+    if (lwNum == 6) {
+        if (argc < 4) subTask = 'a';
+        else subTask = argv[3][0];
+
+        if (argc < 5) parameter = 0;
+        else parameter = std::stof(argv[4]);
+
+        if (subTask == 'c' && argc < 6) {
+            cout << "Labwork 6 subtask C needs a second image\n";
+            exit(0);
+        }
+        
+        JpegLoader loader;
+        string inputFileName2 = std::string(argv[5]);
+        inputImage2 = loader.load(inputFileName2);
     }
 
     printf("Starting labwork %d\n", lwNum);
@@ -65,7 +91,7 @@ int main(int argc, char **argv) {
             labwork.saveOutputImage("labwork5-gpu-out.jpg");
             break;
         case 6:
-            labwork.labwork6_GPU();
+            labwork.labwork6_GPU(subTask, parameter);
             labwork.saveOutputImage("labwork6-gpu-out.jpg");
             break;
         case 7:
@@ -231,7 +257,7 @@ void Labwork::labwork3_GPU() {
 	int pixelCount = inputImage->width * inputImage->height;
 	outputImage = static_cast<byte *>(malloc(pixelCount * 3));
 	// Allocate CUDA memory    
-	byte* ginput = nullptr, *goutput = nullptr;
+   	byte* ginput = nullptr, *goutput = nullptr;
 	cudaMalloc(&ginput, pixelCount * 3);
 	cudaMalloc(&goutput, pixelCount * 3);
 
@@ -282,7 +308,7 @@ void Labwork::labwork3_GPU() {
     fo.close();
     
     cudaFree(ginput);
-	 cudaFree(goutput);
+	cudaFree(goutput);
 }
 
 //**********************
@@ -520,7 +546,6 @@ void convo2dShare(byte* goutput, byte* ginput, int height, int width)
     } 
 }
 
-#include <iostream>
 void Labwork::labwork5_GPU(bool shared) {
     //Timer timer;
     //double tmp, kernelTime;
@@ -565,10 +590,88 @@ void Labwork::labwork5_GPU(bool shared) {
     cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);	
 
     free(grayImage);
+    cudaFree(ginput);
+    cudaFree(goutput);
 }
 
-//*****
-void Labwork::labwork6_GPU() {
+//********
+
+// input/output are array of 3*pixelCount char
+__device__
+void binarizePixel(int i, byte* ginput, byte* goutput, float threshold)
+{
+    const byte gray = byte(int(ginput[3*i]) + int(ginput[3*i + 1]) + int(ginput[3*i+2])) / 3;
+    const byte binary = (gray >= threshold) ? 255 : 0;
+    goutput[3 * i] = binary;
+    goutput[3 * i + 1] = binary;
+    goutput[3 * i + 2] = binary;
+}
+
+// coeff is the ratio of new brightness. FOr example, 50% more brightness -> coeff = 1.5, 20% less -> coeff = 0.8
+__device__
+void changePixelBrightness(int i, byte* ginput, byte* goutput, float coeff)
+{
+    goutput[3 * i] = min(coeff * ginput[3 * i], 255.0f);
+    goutput[3 * i + 1] = min(coeff * ginput[3 * i + 1], 255.0f);
+    goutput[3 * i + 2] = min(coeff * ginput[3 * i + 2], 255.0f);
+}
+
+template<char subTask>
+__global__
+void mappingAB(int n, byte* ginput, byte* goutput, float parameter)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+    {
+        if (subTask == 'a') binarizePixel(i, ginput, goutput, parameter);
+        else if (subTask == 'b') changePixelBrightness(i, ginput, goutput, parameter);
+    }
+}
+
+__global__
+void mappingC(int n, byte* ginput1, byte* ginput2, byte* goutput, const float c)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+    {
+        const int index = 3 * i;
+        goutput[index] = c * ginput1[index] + (1 - c) * ginput2[index];
+        goutput[index + 1] = c * ginput1[index + 1] + (1 - c) * ginput2[index + 1];
+        goutput[index + 2] = c * ginput1[index + 2] + (1 - c) * ginput2[index + 2];
+    }
+}
+
+void Labwork::labwork6_GPU(char subTask, float parameter) {
+    //Timer timer;
+	//double tmp, kernelTime;
+	
+	int pixelCount = inputImage->width * inputImage->height;
+	outputImage = static_cast<byte *>(malloc(pixelCount * 3));
+	// Allocate CUDA memory    
+	byte* ginput = nullptr, *ginput2 = nullptr, *goutput = nullptr;
+	cudaMalloc(&ginput, pixelCount * 3);
+    cudaMalloc(&goutput, pixelCount * 3);
+    
+    //
+    cudaMemcpy(ginput, inputImage->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
+    if (subTask == 'c') {
+        cudaMalloc(&ginput2, pixelCount * 3);
+        cudaMemcpy(ginput2, inputImage2->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
+    }
+
+    if (subTask == 'a') mappingAB<'a'><<<80, 128>>>(pixelCount, ginput, goutput, parameter);
+    else if (subTask == 'b') mappingAB<'b'><<<80, 128>>>(pixelCount, ginput, goutput, parameter);
+    else if (subTask == 'c') mappingC<<<80, 128>>>(pixelCount, ginput, ginput2, goutput, parameter);
+    else {
+        std::cout << "Labwork 6 wrong subtask name (a,b,c only). Exiting\n";
+        exit(0);
+    }
+
+    cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
+
+    cudaFree(ginput);
+    if (subTask == 'c') cudaFree(ginput2);
+    cudaFree(goutput);
 }
 
 void Labwork::labwork7_GPU() {

@@ -27,7 +27,7 @@ public:
 
     void labwork5_GPU(bool shared);
 
-    void labwork6_GPU();
+    void labwork6_GPU(char subtask='a', float parameter=0.0f);
 
     void labwork7_GPU();
 
