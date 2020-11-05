@@ -51,14 +51,15 @@ int main(int argc, char **argv) {
         if (argc < 5) parameter = 0;
         else parameter = std::stof(argv[4]);
 
-        if (subTask == 'c' && argc < 6) {
-            cout << "Labwork 6 subtask C needs a second image\n";
-            exit(0);
+        if (subTask == 'c') {
+            if (argc < 6) {
+                cout << "Labwork 6 subtask C needs a second image\n";
+                exit(0);
+            }
+            JpegLoader loader;
+            string inputFileName2 = std::string(argv[5]);
+            inputImage2 = loader.load(inputFileName2);
         }
-        
-        JpegLoader loader;
-        string inputFileName2 = std::string(argv[5]);
-        inputImage2 = loader.load(inputFileName2);
     }
 
     printf("Starting labwork %d\n", lwNum);
