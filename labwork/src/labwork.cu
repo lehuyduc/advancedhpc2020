@@ -685,7 +685,151 @@ void Labwork::labwork6_GPU(char subTask, float parameter) {
     cudaFree(goutput);
 }
 
+
+//*****************
+
+__device__
+inline void getMinmax(uchar2* sdata, int stride) {
+    sdata[tidx].x = min(sdata[tidx].x, sdata[tidx + stride].x);
+    sdata[tidx].y = max(sdata[tidx].y, sdata[tidx + stride].y);    
+}
+
+__device__
+inline void getMinmaxVolatile(volatile uchar2* sdata, int stride) {
+    sdata[tidx].x = min(sdata[tidx].x, sdata[tidx + stride].x);
+    sdata[tidx].y = max(sdata[tidx].y, sdata[tidx + stride].y);    
+}
+
+template<unsigned int blockSize>
+__device__
+void warpReduceMinmax(volatile uchar2* sdata)
+{
+    if (blockSize >= 64) getMinmaxVolatile(sdata, 32);
+    if (blockSize >= 32) getMinmaxVolatile(sdata, 16);
+    if (blockSize >= 16) getMinmaxVolatile(sdata, 8);
+    if (blockSize >= 8) getMinmaxVolatile(sdata, 4);
+    if (blockSize >= 4) getMinmaxVolatile(sdata, 2);
+    if (blockSize >= 2) getMinmaxVolatile(sdata, 1);
+}
+
+// blockSize must be power of 2, <= 512.
+template<unsigned int blockSize>
+__global__
+void reduceMinmaxStage1(const int n, byte* input, uchar2* output)
+{
+    __shared__ uchar2 sdata[blockSize]; // uchar[2*i] = min, uchar[2*i+1] = max
+    // * 2 because each element loads and find min/max of 2 input index at each step
+    int i = blockIdx.x * (blockSize * 2) + threadIdx.x; 
+    int gridSize = blockSize * 2 * gridDim.x;
+    sdata[tidx].x = 255;
+    sdata[tidx].y = 0;
+
+    // strided loop to cover the entire array. We do this instead of creating 
+    // more blocks because too many blocks = inefficient.
+    // NOTE THAT IF N IS NOT POWER OF 2 THEN THERE NEEDS TO BE AN IF STATEMENT FOR THE SECOND OPERATION
+    while (i < n) {        
+        sdata[tidx].x = min(sdata[tidx].x, input[i]);
+        sdata[tidx].y = max(sdata[tidx].y, input[i]);
+        if (i + blockSize < n) {
+            sdata[tidx].x = min(sdata[tidx].x, input[i + blockSize]);
+            sdata[tidx].y = max(sdata[tidx].y, input[i + blockSize]);
+        }
+        i += gridSize;
+    }        
+    __syncthreads();
+
+    // Manually unrolling the loop to reduce loop-overhead. Probably #pragma unroll is enough.
+    // these if statements are done at compile time, thansk to template.
+    if (blockSize >= 512) {if (tidx < 256) getMinmax(sdata, 256); __syncthreads();}
+    if (blockSize >= 256) {if (tidx < 128) getMinmax(sdata, 128); __syncthreads();}
+    if (blockSize >= 128) {if (tidx < 64)  getMinmax(sdata, 64);  __syncthreads();}
+
+    if (tidx < 32) warpReduceMinmax<blockSize>(sdata);
+    if (tidx == 0) {
+        output[blockIdx.x].x = sdata[0].x;
+        output[blockIdx.x].y = sdata[0].y;
+    }
+}
+
+
+// in this function numBlock is around 64-512.
+// So we launch 1 block with enough threads
+template<unsigned int blockSize>
+__global__
+void reduceMinmaxStage2(int numBlock, uchar2* stage1Output, uchar2* minmax)
+{
+    __shared__ uchar2 sdata[blockSize];    
+    if (tidx < numBlock) sdata[tidx] = stage1Output[tidx];
+    else {
+        sdata[tidx].x = 255;
+        sdata[tidx].y = 0;
+    }
+    __syncthreads();
+
+    if (blockSize >= 512) {if (tidx < 256) getMinmax(sdata, 256); __syncthreads();}
+    if (blockSize >= 256) {if (tidx < 128) getMinmax(sdata, 128); __syncthreads();}
+    if (blockSize >= 128) {if (tidx < 64)  getMinmax(sdata, 64);  __syncthreads();}
+
+    if (tidx < 32) warpReduceMinmax<blockSize>(sdata);
+    if (tidx == 0) *minmax = sdata[0];
+}
+
+// input is single-channel grayscale, but output is 3-channel
+__global__
+void grayscaleStretch(const int n, byte* input, byte* output, const float minval, const float maxval)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    const float coeff = float(255) / (maxval - minval); // multiply much faster than division
+
+    for (int i=index; i<n; i+=stride) {
+        output[3 * i] = (float(input[i]) - minval) * coeff;
+        output[3 * i + 1] = output[3 * i];
+        output[3 * i + 2] = output[3 * i];
+    }
+}
+
 void Labwork::labwork7_GPU() {
+    //Timer timer;
+    //double tmp, kernelTime;
+    
+    int pixelCount = inputImage->width * inputImage->height;    
+    labwork1_CPU();
+    byte* grayImage = (byte*)malloc(pixelCount);
+    for (int i=0; i<pixelCount; i++) grayImage[i] = outputImage[3*i];
+
+    // Allocate CUDA memory    
+    const int numBlock = 80, blockSize = 128;
+    byte* ginput = nullptr, *goutput = nullptr;
+    uchar2* gstage1Output, *gminmax;
+    uchar2 minmax;
+	cudaMalloc(&ginput, pixelCount * 3);
+    cudaMalloc(&goutput, pixelCount * 3);
+    cudaMalloc(&gstage1Output, numBlock * sizeof(uchar2));
+    cudaMalloc(&gminmax, sizeof(uchar2));
+
+    cout << "pixel count = " << pixelCount << "\n";
+    cudaMemcpy(ginput, grayImage, pixelCount, cudaMemcpyHostToDevice);    
+    reduceMinmaxStage1<blockSize><<<80, blockSize>>>(pixelCount, ginput, gstage1Output);
+    reduceMinmaxStage2<blockSize><<<1, blockSize>>>(numBlock, gstage1Output, gminmax);
+    cudaMemcpy(&minmax, gminmax, sizeof(uchar2), cudaMemcpyDeviceToHost);
+    grayscaleStretch<<<80,128>>>(pixelCount, ginput, goutput, minmax.x, minmax.y);
+    cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
+
+    /*
+    cudaMemcpy(&minmax, gminmax, sizeof(uchar2), cudaMemcpyDeviceToHost);
+    int mini = 255, maxi = 0;
+    for (int i=0; i<pixelCount; i++) {
+        mini = min(mini, int(grayImage[i]));
+        maxi = max(maxi, int(grayImage[i]));        
+    }
+
+    cout << "CPU res = " << mini << " " << maxi << "\n";
+    cout << "GPU res = " << int(minmax.x) << " " << int(minmax.y) << "\n";
+    */
+
+    cudaFree(ginput);
+    cudaFree(goutput);    
 }
 
 void Labwork::labwork8_GPU() {
