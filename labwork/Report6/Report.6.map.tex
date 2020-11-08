@@ -1,0 +1,90 @@
+\documentclass[14pt]{article}
+\usepackage{float}
+\usepackage
+[
+        a4paper,% other options: a3paper, a5paper, etc
+        left=2cm,
+        right=2cm,
+        top=3cm,
+        bottom=4cm,
+]
+{geometry}
+
+\usepackage[utf8]{inputenc}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\lstset { %
+    language=C++,
+    backgroundcolor=\color{black!5}, % set backgroundcolor
+    basicstyle=\footnotesize,% basic font setting
+}
+
+
+\title{Report.6.map}
+\author{lehuyduc3 }
+\date{November 2020}
+\usepackage{indentfirst}
+\parindent{}
+
+\begin{document}
+
+\maketitle
+
+\section{How to implement labwork}
+These 3 tasks are perfectly parallel, and each input index correspond to exactly 1 output index. So, we can keep the same "mapping" function for both subtask A and B, and only need to change the $F()$ function.
+
+\subsection{Image binarization and Changing pixel brightness}
+    \begin{lstlisting}
+// input/output are array of 3*pixelCount char
+__device__
+void binarizePixel(int i, byte* ginput, byte* goutput, float threshold)
+{
+    const byte gray = byte(int(ginput[3*i]) + int(ginput[3*i + 1]) + int(ginput[3*i+2])) / 3;
+    const byte binary = (gray >= threshold) ? 255 : 0;
+    
+    goutput[3 * i] = binary;
+    goutput[3 * i + 1] = binary;
+    goutput[3 * i + 2] = binary;
+}   Th
+
+// coeff is the ratio of new brightness. 
+// For example, 50% more brightness -> coeff = 1.5, 20% less -> coeff = 0.8
+__device__
+void changePixelBrightness(int i, byte* ginput, byte* goutput, float coeff)
+{
+    goutput[3 * i] = min(coeff * ginput[3 * i], 255.0f);
+    goutput[3 * i + 1] = min(coeff * ginput[3 * i + 1], 255.0f);
+    goutput[3 * i + 2] = min(coeff * ginput[3 * i + 2], 255.0f);
+}
+
+template<char subTask>
+__global__
+void mappingAB(int n, byte* ginput, byte* goutput, float parameter)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+    {
+        if (subTask == 'a') binarizePixel(i, ginput, goutput, parameter);
+        else if (subTask == 'b') changePixelBrightness(i, ginput, goutput, parameter);
+    }
+}
+    \end{lstlisting}
+
+\subsection{Blending two images}
+This task is also perfectly parallel. To keep it short I merge the $f()$ function inside the mapping function.
+    \begin{lstlisting}
+__global__
+void mappingC(int n, byte* ginput1, byte* ginput2, byte* goutput, const float c)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+    {
+        const int index = 3 * i;
+        goutput[index] = c * ginput1[index] + (1 - c) * ginput2[index];
+        goutput[index + 1] = c * ginput1[index + 1] + (1 - c) * ginput2[index + 1];
+        goutput[index + 2] = c * ginput1[index + 2] + (1 - c) * ginput2[index + 2];
+    }
+}
+    \end{lstlisting}
+\end{document}

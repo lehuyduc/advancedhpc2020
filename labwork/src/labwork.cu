@@ -602,12 +602,12 @@ __device__
 void binarizePixel(int i, byte* ginput, byte* goutput, float threshold)
 {
     const byte gray = byte(int(ginput[3*i]) + int(ginput[3*i + 1]) + int(ginput[3*i+2])) / 3;
-    //const byte binary = (gray >= threshold) ? 255 : 0;
-    const byte binary = 255 * (gray >= threshold);
+    const byte binary = (gray >= threshold) ? 255 : 0;
+    
     goutput[3 * i] = binary;
     goutput[3 * i + 1] = binary;
     goutput[3 * i + 2] = binary;
-}
+}   
 
 // coeff is the ratio of new brightness. FOr example, 50% more brightness -> coeff = 1.5, 20% less -> coeff = 0.8
 __device__
@@ -644,8 +644,8 @@ void mappingC(int n, byte* ginput1, byte* ginput2, byte* goutput, const float c)
 }
 
 void Labwork::labwork6_GPU(char subTask, float parameter) {
-    //Timer timer;
-	//double tmp, kernelTime;
+    Timer timer;
+	double tmp, kernelTime;
 	
 	int pixelCount = inputImage->width * inputImage->height;
 	outputImage = static_cast<byte *>(malloc(pixelCount * 3));
@@ -655,21 +655,29 @@ void Labwork::labwork6_GPU(char subTask, float parameter) {
     cudaMalloc(&goutput, pixelCount * 3);
     
     //
-    cudaMemcpy(ginput, inputImage->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
-    if (subTask == 'c') {
-        cudaMalloc(&ginput2, pixelCount * 3);
-        cudaMemcpy(ginput2, inputImage2->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
-    }
+    kernelTime = 0;
+    for (int t=1; t<=100; t++)
+    {
+        cudaMemcpy(ginput, inputImage->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
+        if (subTask == 'c') {
+            cudaMalloc(&ginput2, pixelCount * 3);
+            cudaMemcpy(ginput2, inputImage2->buffer, pixelCount * 3, cudaMemcpyHostToDevice);
+        }
 
-    if (subTask == 'a') mappingAB<'a'><<<80, 128>>>(pixelCount, ginput, goutput, parameter);
-    else if (subTask == 'b') mappingAB<'b'><<<80, 128>>>(pixelCount, ginput, goutput, parameter);
-    else if (subTask == 'c') mappingC<<<80, 128>>>(pixelCount, ginput, ginput2, goutput, parameter);
-    else {
-        std::cout << "Labwork 6 wrong subtask name (a,b,c only). Exiting\n";
-        exit(0);
-    }
+        timer.start();
+        if (subTask == 'a') mappingAB<'a'><<<80, 128>>>(pixelCount, ginput, goutput, parameter);
+        else if (subTask == 'b') mappingAB<'b'><<<80, 128>>>(pixelCount, ginput, goutput, parameter);
+        else if (subTask == 'c') mappingC<<<80, 128>>>(pixelCount, ginput, ginput2, goutput, parameter);
+        else {
+            std::cout << "Labwork 6 wrong subtask name (a,b,c only). Exiting\n";
+            exit(0);
+        }
+        tmp = timer.getElapsedTimeInMilliSec();
+        kernelTime += tmp;
 
-    cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
+        cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
+    }
+    cout << "Time 100 task a = " << kernelTime << "ms\n";
 
     cudaFree(ginput);
     if (subTask == 'c') cudaFree(ginput2);
