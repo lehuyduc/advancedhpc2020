@@ -1,0 +1,164 @@
+\documentclass[14pt]{article}
+\usepackage{float}
+\usepackage
+[
+        a4paper,% other options: a3paper, a5paper, etc
+        left=2cm,
+        right=2cm,
+        top=3cm,
+        bottom=4cm,
+]
+{geometry}
+
+\usepackage[utf8]{inputenc}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\lstset { %
+    language=C++,
+    backgroundcolor=\color{black!5}, % set backgroundcolor
+    basicstyle=\footnotesize,% basic font setting
+    tabsize=2
+}
+
+
+\title{Report.5.gaussian.blur}
+\author{lehuyduc3 }
+\date{November 2020}
+\usepackage{indentfirst}
+\parindent{}
+
+\begin{document}
+
+\maketitle
+
+\section{How to implement labwork}
+\subsection{CPU version}
+\begin{itemize}
+    \item Loop over each pixel, $(i,j)$
+    \item Placed \textbf{top-left} of kernel on that pixel
+    \item Calculate convolution
+    \item {Output value at $(i + filterHeight / 2, j + filterWidth / 2)$}
+\end{itemize}
+
+\begin{lstlisting}
+	for (int i=-midRow; i<height; i++)
+	for (int j=-midCol; j<width; j++)
+	{
+		float sum = 0;
+		int outputX = i + midRow, outputY = j + midCol;
+		if (outputX < 0 || outputY < 0  
+		    || outputX >= height || outputY >= width) continue; // output outside image
+		
+		for (int u=0; u<filtH; u++)
+		for (int v=0; v<filtW; v++) 
+			{
+				int pixelRow = i + u, pixelCol = j + v;
+				if (pixelRow < 0 || pixelCol < 0 || pixelRow >= height || pixelCol >= width) 
+					sum += 0;
+				else 
+					sum += filt[cell(u,v,filtW)] * grayImage[cell(pixelRow, pixelCol, width)];
+			}
+			
+		int outputPixel = cell(outputX, outputY, width);
+		outputImage[3 * outputPixel] = sum * filtSumInv;
+		outputImage[3 * outputPixel + 1] = outputImage[3 * outputPixel];
+		outputImage[3 * outputPixel + 2] = outputImage[3 * outputPixel];
+    }
+\end{lstlisting}
+
+\subsection{GPU no shared version}
+\begin{itemize}
+    \item Use 2D blocks, each block size $32x32$
+    \item Launch enough blocks to cover all columns
+    \item Number of block is $(imageWidth + 32 - 1) / 32$.
+    \item Therefore, block $0$ processes columns $0..31$, block $1$ processes columns $32..63$, ...
+\end{itemize}
+
+
+The launch configuration is as follow. Note that $TILE\_DIM = 32$.
+\begin{lstlisting}
+    if (!shared) {
+            dim3 blockDim = dim3(TILE_DIM, TILE_DIM, 1);
+            dim3 gridDim = dim3((width + TILE_DIM - 1) / TILE_DIM, 1, 1);
+            convo2dNoShare<<<gridDim, blockDim>>>(goutput, ginput, height, width);
+    }
+\end{lstlisting}
+
+\begin{itemize}
+    \item Each block processes rows $0..31$, then rows $32..63$, ... 
+    \item Each thread places top-left corner of the kernel on its current pixel, convolute, then output at its desinated pixel.
+    \item \textbf{Note:} we store filter in constant memory because all threads in a warp always access the same position of the filter at a time.
+\end{itemize}
+
+\begin{lstlisting}
+    for (int row = threadIdx.y - gmidRow; row < height; row += blockDim.y)
+    {
+        const int outputRow = row + gmidRow;
+        if (outputRow < height)
+        {
+            float sum = 0;
+
+            for (int u=0; u<gfiltH; u++)
+            for (int v=0; v<gfiltW; v++)
+            {
+                int pixelRow = row + u, pixelCol = col + v;
+				if (pixelRow < 0 || pixelCol < 0 || pixelRow >= height || pixelCol >= width) 
+					sum += 0;
+				else 
+					sum += gfilt[cell(u,v,gfiltW)] * ginput[cell(pixelRow, pixelCol, width)];
+            }
+            
+            int outputPixel = cell(outputRow, outputCol, width);
+            float outputValue = sum * gfiltSumInv;
+            goutput[3 * outputPixel] = outputValue;
+            goutput[3 * outputPixel + 1] = outputValue;
+            goutput[3 * outputPixel + 2] = outputValue;
+        }
+    }
+\end{lstlisting}
+
+\subsection{GPU version shared memory}
+\begin{itemize}
+    \item We use tiled convolution for this task.
+    \item Each block has $32x32$ float element for shared memory
+    \item The grid process a group of rows at the time like the previous version
+    \item For each $32x32$ block, we load the image data from global memory to shared memory. Then we perform convolution using shared memory. The filter is still stored in constant memory
+\end{itemize}
+
+\begin{lstlisting}
+    if (row < 0 || col < 0 || row>=height || col>=width)
+        smem[tidy][tidx] = 0;
+    else 
+        smem[tidy][tidx] = ginput[cell(row, col, width)];
+    __syncthreads();
+\caption{Loading data into shared memory}
+\end{lstlisting}
+
+\begin{lstlisting}
+    // top-left of the kernel is placed at this pixel, and it must fit
+    if (outputRow < height 
+        && tidy < TILE_DIM - gfiltH + 1 && tidx < TILE_DIM - gfiltW + 1)  shared mem 
+    {
+        float sum = 0;
+
+        for (int u=0; u<gfiltH; u++)
+        for (int v=0; v<gfiltW; v++)
+        {
+            int pixelRow = row + u, pixelCol = col + v;
+			if (pixelRow < 0 || pixelCol < 0 || pixelRow >= height || pixelCol >= width) 
+				sum += 0;
+			else 
+				sum += gfilt[cell(u,v,gfiltW)] * smem[tidy + u][tidx + v];
+        }
+        
+        int outputPixel = cell(outputRow, outputCol, width);
+        float outputValue = sum * gfiltSumInv;
+        goutput[3 * outputPixel] = outputValue;
+        goutput[3 * outputPixel + 1] = outputValue;
+        goutput[3 * outputPixel + 2] = outputValue;
+    }
+\caption{Tiled 2D convolution}
+\end{lstlisting}
+
+\end{document}
