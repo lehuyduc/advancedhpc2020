@@ -513,6 +513,7 @@ void convo2dShare(byte* goutput, byte* ginput, int height, int width)
     {
         __syncthreads();
         
+        // load data into shared memory
         if (row < 0 || col < 0 || row>=height || col>=width)
             smem[tidy][tidx] = 0;
         else 
