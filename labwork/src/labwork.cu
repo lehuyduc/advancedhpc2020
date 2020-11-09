@@ -819,7 +819,7 @@ void Labwork::labwork7_GPU() {
     for (int i=0; i<pixelCount; i++) grayImage[i] = outputImage[3*i];
 
     // Allocate CUDA memory    
-    const int numBlock = 80, blockSize = 128;
+    const int numBlock = 64, blockSize = 128;
     byte* ginput = nullptr, *goutput = nullptr;
     uchar2* gstage1Output, *gminmax;
     uchar2 minmax;
@@ -835,7 +835,7 @@ void Labwork::labwork7_GPU() {
         reduceMinmaxStage1<blockSize><<<80, blockSize>>>(pixelCount, ginput, gstage1Output);
         reduceMinmaxStage2<blockSize><<<1, blockSize>>>(numBlock, gstage1Output, gminmax);
         cudaMemcpy(&minmax, gminmax, sizeof(uchar2), cudaMemcpyDeviceToHost);
-        grayscaleStretch<<<80,128>>>(pixelCount, ginput, goutput, minmax.x, minmax.y);
+        grayscaleStretch<<<numBlock,blockSize>>>(pixelCount, ginput, goutput, minmax.x, minmax.y);
         cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
     }
     

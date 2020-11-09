@@ -1,0 +1,153 @@
+\documentclass[14pt]{article}
+\usepackage{float}
+\usepackage
+[
+        a4paper,% other options: a3paper, a5paper, etc
+        left=2cm,
+        right=2cm,
+        top=3cm,
+        bottom=4cm,
+]
+{geometry}
+
+\usepackage[utf8]{inputenc}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\lstset { %
+    language=C++,
+    backgroundcolor=\color{black!5}, % set backgroundcolor
+    basicstyle=\footnotesize,% basic font setting
+}
+
+
+\title{Report.7.reduce}
+\author{lehuyduc3 }
+\date{November 2020}
+\usepackage{indentfirst}
+\parindent{}
+
+\begin{document}
+
+\maketitle
+
+\section{How to implement labwork}
+This labwork is separated into 2 main parts: finding min/max, then grayscale stretch.
+
+\subsection{Reduction: finding min/max}
+For the reduction kernel, we use shared memory, sequential addressing with little bank conflict, let one thread process multiple input data to reduce overhead, use loop-unrolling at compile time using template, and use warp auto-synchronization (lower cost than \textit{syncthreads()}).
+
+\begin{lstlisting}
+// utility function to type less
+__device__
+inline void getMinmax(uchar2* sdata, int stride) {
+    sdata[tidx].x = min(sdata[tidx].x, sdata[tidx + stride].x);
+    sdata[tidx].y = max(sdata[tidx].y, sdata[tidx + stride].y);    
+}
+
+// volatile memory counts as a different data type
+__device__
+inline void getMinmaxVolatile(volatile uchar2* sdata, int stride) {
+    sdata[tidx].x = min(sdata[tidx].x, sdata[tidx + stride].x);
+    sdata[tidx].y = max(sdata[tidx].y, sdata[tidx + stride].y);    
+}
+
+// 32 threads in the same warp are always synchronized.
+// By doing this, we avoid cost of using __syncthreads()
+template<unsigned int blockSize>
+__device__
+void warpReduceMinmax(volatile uchar2* sdata)
+{
+    if (blockSize >= 64) getMinmaxVolatile(sdata, 32);
+    if (blockSize >= 32) getMinmaxVolatile(sdata, 16);
+    if (blockSize >= 16) getMinmaxVolatile(sdata, 8);
+    if (blockSize >= 8) getMinmaxVolatile(sdata, 4);
+    if (blockSize >= 4) getMinmaxVolatile(sdata, 2);
+    if (blockSize >= 2) getMinmaxVolatile(sdata, 1);
+}
+
+// blockSize must be power of 2, <= 512.
+template<unsigned int blockSize>
+__global__
+void reduceMinmaxStage1(const int n, byte* input, uchar2* output)
+{
+    __shared__ uchar2 sdata[blockSize]; // uchar[2*i] = min, uchar[2*i+1] = max
+    // * 2 because each element loads and find min/max of 2 input index at each step
+    int i = blockIdx.x * (blockSize * 2) + threadIdx.x; 
+    const int gridSize = blockSize * 2 * gridDim.x;    
+
+    // strided loop to cover the entire array. We do this instead of creating 
+    // more blocks because too many blocks = inefficient.
+    // Note 2: use register perform strided-reduction instead of shared memory for more speed, 
+    // since each thread process completely independent data. Data is only written to smem at the end
+    byte minval = 255, maxval = 0;
+    while (i < n) {        
+        minval = min(minval, input[i]);
+        maxval = max(maxval, input[i]);
+        if (i + blockSize < n) {
+            minval = min(minval, input[i + blockSize]);
+            maxval = max(maxval, input[i + blockSize]);
+        }
+        i += gridSize;
+    }        
+    sdata[tidx].x = minval;
+    sdata[tidx].y = maxval;    
+    __syncthreads();
+
+    if (blockSize >= 512) {if (tidx < 256) getMinmax(sdata, 256); __syncthreads();}
+    if (blockSize >= 256) {if (tidx < 128) getMinmax(sdata, 128); __syncthreads();}
+    if (blockSize >= 128) {if (tidx < 64)  getMinmax(sdata, 64);  __syncthreads();}
+
+    if (tidx < 32) warpReduceMinmax<blockSize>(sdata);
+    if (tidx == 0) {
+        output[blockIdx.x].x = sdata[0].x;
+        output[blockIdx.x].y = sdata[0].y;
+    }
+}
+
+// in this function numBlock is around 64-512.
+// So we launch 1 block with enough threads
+template<unsigned int blockSize>
+__global__
+void reduceMinmaxStage2(int numBlock, uchar2* stage1Output, uchar2* minmax)
+{
+    __shared__ uchar2 sdata[blockSize];    
+    if (tidx < numBlock) sdata[tidx] = stage1Output[tidx];
+    else {
+        sdata[tidx].x = 255;
+        sdata[tidx].y = 0;
+    }
+    __syncthreads();
+
+    if (blockSize >= 512) {if (tidx < 256) getMinmax(sdata, 256); __syncthreads();}
+    if (blockSize >= 256) {if (tidx < 128) getMinmax(sdata, 128); __syncthreads();}
+    if (blockSize >= 128) {if (tidx < 64)  getMinmax(sdata, 64);  __syncthreads();}
+
+    if (tidx < 32) warpReduceMinmax<blockSize>(sdata);
+    if (tidx == 0) *minmax = sdata[0];
+}
+\end{lstlisting}
+
+The first stage, we perform reduction on the input and each block stores its result in global memory. Then, the second stage performs reduction on the results of the first stage.
+
+\subsection{Grayscale stretch}
+This part is trivial and is self-explanatory.
+
+\begin{lstlisting}
+// input is single-channel grayscale, but output is 3-channel
+__global__
+void grayscaleStretch(const int n, byte* input, byte* output, const float minval, const float maxval)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    const float coeff = float(255) / (maxval - minval); // multiply much faster than division
+
+    for (int i=index; i<n; i+=stride) {
+        output[3 * i] = (float(input[i]) - minval) * coeff;
+        output[3 * i + 1] = output[3 * i];
+        output[3 * i + 2] = output[3 * i];
+    }
+}
+\end{lstlisting}
+
+\end{document}
