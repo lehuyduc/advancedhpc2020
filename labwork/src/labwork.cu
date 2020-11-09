@@ -720,13 +720,19 @@ void reduceMinmaxStage1(const int n, byte* input, uchar2* output)
     __shared__ uchar2 sdata[blockSize]; // uchar[2*i] = min, uchar[2*i+1] = max
     // * 2 because each element loads and find min/max of 2 input index at each step
     int i = blockIdx.x * (blockSize * 2) + threadIdx.x; 
-    int gridSize = blockSize * 2 * gridDim.x;
-    sdata[tidx].x = 255;
-    sdata[tidx].y = 0;
+    const int gridSize = blockSize * 2 * gridDim.x;    
 
     // strided loop to cover the entire array. We do this instead of creating 
     // more blocks because too many blocks = inefficient.
-    // NOTE THAT IF N IS NOT POWER OF 2 THEN THERE NEEDS TO BE AN IF STATEMENT FOR THE SECOND OPERATION
+    // NOTE 1: IF N IS NOT POWER OF 2 THEN THERE NEEDS TO BE AN IF STATEMENT FOR THE SECOND OPERATION
+    // Note 2: use register perform strided-reduction instead of shared memory for more speed, 
+    //         since each thread process completely independent data. Data is only written to smem at the end
+    
+    /*
+    // old code writing to shared memory all the time
+    sdata[tidx].x = 255;
+    sdata[tidx].y = 0;
+
     while (i < n) {        
         sdata[tidx].x = min(sdata[tidx].x, input[i]);
         sdata[tidx].y = max(sdata[tidx].y, input[i]);
@@ -735,7 +741,21 @@ void reduceMinmaxStage1(const int n, byte* input, uchar2* output)
             sdata[tidx].y = max(sdata[tidx].y, input[i + blockSize]);
         }
         i += gridSize;
+    } 
+    */       
+
+    byte minval = 255, maxval = 0;
+    while (i < n) {        
+        minval = min(minval, input[i]);
+        maxval = max(maxval, input[i]);
+        if (i + blockSize < n) {
+            minval = min(minval, input[i + blockSize]);
+            maxval = max(maxval, input[i + blockSize]);
+        }
+        i += gridSize;
     }        
+    sdata[tidx].x = minval;
+    sdata[tidx].y = maxval;    
     __syncthreads();
 
     // Manually unrolling the loop to reduce loop-overhead. Probably #pragma unroll is enough.
@@ -803,21 +823,23 @@ void Labwork::labwork7_GPU() {
     byte* ginput = nullptr, *goutput = nullptr;
     uchar2* gstage1Output, *gminmax;
     uchar2 minmax;
-	cudaMalloc(&ginput, pixelCount * 3);
-    cudaMalloc(&goutput, pixelCount * 3);
+	cudaMalloc(&ginput, pixelCount);
     cudaMalloc(&gstage1Output, numBlock * sizeof(uchar2));
+    cudaMalloc(&goutput, pixelCount * 3);    
     cudaMalloc(&gminmax, sizeof(uchar2));
 
-    cout << "pixel count = " << pixelCount << "\n";
-    cudaMemcpy(ginput, grayImage, pixelCount, cudaMemcpyHostToDevice);    
-    reduceMinmaxStage1<blockSize><<<80, blockSize>>>(pixelCount, ginput, gstage1Output);
-    reduceMinmaxStage2<blockSize><<<1, blockSize>>>(numBlock, gstage1Output, gminmax);
-    cudaMemcpy(&minmax, gminmax, sizeof(uchar2), cudaMemcpyDeviceToHost);
-    grayscaleStretch<<<80,128>>>(pixelCount, ginput, goutput, minmax.x, minmax.y);
-    cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
-
+    for (int t=1; t<=20; t++)
+    {
+        //cout << "pixel count = " << pixelCount << "\n";
+        cudaMemcpy(ginput, grayImage, pixelCount, cudaMemcpyHostToDevice);    
+        reduceMinmaxStage1<blockSize><<<80, blockSize>>>(pixelCount, ginput, gstage1Output);
+        reduceMinmaxStage2<blockSize><<<1, blockSize>>>(numBlock, gstage1Output, gminmax);
+        cudaMemcpy(&minmax, gminmax, sizeof(uchar2), cudaMemcpyDeviceToHost);
+        grayscaleStretch<<<80,128>>>(pixelCount, ginput, goutput, minmax.x, minmax.y);
+        cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
+    }
+    
     /*
-    cudaMemcpy(&minmax, gminmax, sizeof(uchar2), cudaMemcpyDeviceToHost);
     int mini = 255, maxi = 0;
     for (int i=0; i<pixelCount; i++) {
         mini = min(mini, int(grayImage[i]));
@@ -827,9 +849,11 @@ void Labwork::labwork7_GPU() {
     cout << "CPU res = " << mini << " " << maxi << "\n";
     cout << "GPU res = " << int(minmax.x) << " " << int(minmax.y) << "\n";
     */
-
+    
     cudaFree(ginput);
+    cudaFree(gstage1Output);
     cudaFree(goutput);    
+    cudaFree(gminmax);
 }
 
 void Labwork::labwork8_GPU() {
