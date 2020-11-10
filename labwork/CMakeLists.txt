@@ -9,7 +9,7 @@ if (NOT CUDA_FOUND)
     message("Correct CUDA location not found")
 endif()
 
-list(APPEND CUDA_NVCC_FLAGS -std=c++11 -O3 -Wno-deprecated-gpu-targets)
+list(APPEND CUDA_NVCC_FLAGS -std=c++11 -O3 -gencode=arch=compute_61,code=sm_61 -Wno-deprecated-gpu-targets)
 
 find_package(OpenMP)
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")

@@ -728,22 +728,6 @@ void reduceMinmaxStage1(const int n, byte* input, uchar2* output)
     // Note 2: use register perform strided-reduction instead of shared memory for more speed, 
     //         since each thread process completely independent data. Data is only written to smem at the end
     
-    /*
-    // old code writing to shared memory all the time
-    sdata[tidx].x = 255;
-    sdata[tidx].y = 0;
-
-    while (i < n) {        
-        sdata[tidx].x = min(sdata[tidx].x, input[i]);
-        sdata[tidx].y = max(sdata[tidx].y, input[i]);
-        if (i + blockSize < n) {
-            sdata[tidx].x = min(sdata[tidx].x, input[i + blockSize]);
-            sdata[tidx].y = max(sdata[tidx].y, input[i + blockSize]);
-        }
-        i += gridSize;
-    } 
-    */       
-
     byte minval = 255, maxval = 0;
     while (i < n) {        
         minval = min(minval, input[i]);
@@ -821,7 +805,7 @@ void Labwork::labwork7_GPU() {
     // Allocate CUDA memory    
     const int numBlock = 64, blockSize = 128;
     byte* ginput = nullptr, *goutput = nullptr;
-    uchar2* gstage1Output, *gminmax;
+    uchar2* gstage1Output, *gminmax; 
     uchar2 minmax;
 	cudaMalloc(&ginput, pixelCount);
     cudaMalloc(&gstage1Output, numBlock * sizeof(uchar2));
@@ -832,31 +816,149 @@ void Labwork::labwork7_GPU() {
     {
         //cout << "pixel count = " << pixelCount << "\n";
         cudaMemcpy(ginput, grayImage, pixelCount, cudaMemcpyHostToDevice);    
-        reduceMinmaxStage1<blockSize><<<80, blockSize>>>(pixelCount, ginput, gstage1Output);
+        reduceMinmaxStage1<blockSize><<<numBlock, blockSize>>>(pixelCount, ginput, gstage1Output);
         reduceMinmaxStage2<blockSize><<<1, blockSize>>>(numBlock, gstage1Output, gminmax);
         cudaMemcpy(&minmax, gminmax, sizeof(uchar2), cudaMemcpyDeviceToHost);
         grayscaleStretch<<<numBlock,blockSize>>>(pixelCount, ginput, goutput, minmax.x, minmax.y);
         cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
     }
-    
-    /*
-    int mini = 255, maxi = 0;
-    for (int i=0; i<pixelCount; i++) {
-        mini = min(mini, int(grayImage[i]));
-        maxi = max(maxi, int(grayImage[i]));        
-    }
 
-    cout << "CPU res = " << mini << " " << maxi << "\n";
-    cout << "GPU res = " << int(minmax.x) << " " << int(minmax.y) << "\n";
-    */
-    
     cudaFree(ginput);
     cudaFree(gstage1Output);
     cudaFree(goutput);    
     cudaFree(gminmax);
 }
 
+//*****
+struct HSV {
+    float h, s, v;
+};
+
+__device__
+inline void rgb2hsvConvert(float r, float g, float b, HSV* outputPtr)
+{    
+    float h, s, v;
+    
+    r /= 255.0f;
+    g /= 255.0f;
+    b /= 255.0f;	
+	
+	float max = fmax(r, fmax(g, b));
+	float min = fmin(r, fmin(g, b));
+	float diff = max - min;
+	
+	v = max;
+	
+	if(v == 0.0f) { // black
+		h = s = 0.0f;
+	} else {
+		s = diff / v;
+		if(diff < 0.001f) { // grey
+			h = 0.0f;
+		} else { // color
+			if(max == r) {
+				h = 60.0f * (g - b)/diff;
+				if(h < 0.0f) { h += 360.0f; }
+			} else if(max == g) {
+				h = 60.0f * (2 + (b - r)/diff);
+			} else {
+				h = 60.0f * (4 + (r - g)/diff);
+			}
+		}		
+	}
+    
+    outputPtr->h = h;
+    outputPtr->s = s;
+    outputPtr->v = v;	
+}
+
+__global__
+void rgb2hsvCuda(int n, byte* input, HSV* output)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int gridSize = blockDim.x * gridDim.x;
+
+    while (i < n) {
+        rgb2hsvConvert(input[3*i], input[3*i+1], input[3*i+2], &output[i]);
+        i += gridSize;
+    }
+}
+
+//****
+__device__
+inline void hsv2rgbConvert(int i, HSV* input, byte* output)
+{
+    float h = input[i].h, s = input[i].s, v = input[i].v;
+	float r, g, b;		
+	
+	float f = h/60.0f;
+	float hi = floorf(f);
+	f = f - hi;
+	float p = v * (1 - s);
+	float q = v * (1 - s * f);
+	float t = v * (1 - s * (1 - f));
+	
+	if(hi == 0.0f || hi == 6.0f) {
+		r = v;
+		g = t;
+		b = p;
+	} else if(hi == 1.0f) {
+		r = q;
+		g = v;
+		b = p;
+	} else if(hi == 2.0f) {
+		r = p;
+		g = v;
+		b = t;
+	} else if(hi == 3.0f) {
+		r = p;
+		g = q;
+		b = v;
+	} else if(hi == 4.0f) {
+		r = t;
+		g = p;
+		b = v;
+	} else {
+		r = v;
+		g = p;
+		b = q;
+    }
+    
+    output[3*i] = 255.0f * r;
+    output[3*i+1] = 255.0f * g;
+    output[3*i+2] = 255.0f * b;		
+}
+
+__global__
+void hsv2rgbCuda(int n, HSV* input, byte* output)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int gridSize = blockDim.x * gridDim.x;
+
+    while (i < n) {
+        hsv2rgbConvert(i, input, output);
+        i += gridSize;
+    }
+
+}
+
 void Labwork::labwork8_GPU() {
+    int pixelCount = inputImage->width * inputImage->height;
+    byte* input = inputImage->buffer;
+	outputImage = static_cast<byte *>(malloc(pixelCount * 3));
+	// Allocate CUDA memory    
+    byte* ginput = nullptr, *goutput = nullptr;
+    HSV* hsvImage = nullptr, *ghsvImage = nullptr;   
+    cudaHostAlloc((void**)&hsvImage, pixelCount * sizeof(HSV), cudaHostAllocDefault);
+    cudaMalloc(&ginput, pixelCount * 3);
+    cudaMalloc(&ghsvImage, pixelCount * sizeof(HSV));
+    cudaMalloc(&goutput, pixelCount * 3);
+    
+    cudaMemcpy(ginput, input, pixelCount * 3, cudaMemcpyHostToDevice);
+    rgb2hsvCuda<<<64, 128>>>(pixelCount, ginput, ghsvImage);
+    hsv2rgbCuda<<<64, 128>>>(pixelCount, ghsvImage, goutput);
+    cudaMemcpy(outputImage, goutput, pixelCount * 3, cudaMemcpyDeviceToHost);
+    cudaMemcpy(hsvImage, ghsvImage, pixelCount * sizeof(HSV), cudaMemcpyDeviceToHost);    
 }
 
 void Labwork::labwork9_GPU() {

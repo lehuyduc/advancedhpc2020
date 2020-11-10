@@ -72,7 +72,7 @@ set(generated_file_internal "/home/lehuyduc/Documents/advancedhpc2020/labwork/CM
 set(generated_cubin_file_internal "/home/lehuyduc/Documents/advancedhpc2020/labwork/CMakeFiles/labwork.dir/src/./labwork_generated_labwork.cu.o.cubin.txt") # path
 
 set(CUDA_NVCC_EXECUTABLE "/usr/bin/nvcc") # path
-set(CUDA_NVCC_FLAGS -std=c++11;-O3;-Wno-deprecated-gpu-targets ;; ) # list
+set(CUDA_NVCC_FLAGS -std=c++11;-O3;-gencode=arch=compute_61,code=sm_61;-Wno-deprecated-gpu-targets ;; ) # list
 # Build specific configuration flags
 set(CUDA_NVCC_FLAGS_DEBUG  ; )
 set(CUDA_NVCC_FLAGS_MINSIZEREL  ; )
